@@ -1,0 +1,1 @@
+{"id": "exp_001", "description": "baseline 1xA100", "bpb": 1.3463, "artifact_bytes": null, "train_time_s": 600, "gpus": "1xA100", "changes": "none - stock train_gpt.py", "notes": "expected worse than 8xH100 baseline (1.2244) due to 1/8 throughput"}
