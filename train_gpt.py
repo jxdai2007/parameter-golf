@@ -1388,7 +1388,7 @@ def main() -> None:
         log0(f"Code size: {code_bytes} bytes")
 
     sd_cpu = {k: v.detach().cpu() for k, v in base_model.state_dict().items()}
-    quant_result, quant_meta = mixed_quantize_int6(sd_cpu, {"mlp"})
+    quant_result, quant_meta = mixed_quantize_int6(sd_cpu, set())  # all int8, no int6
     quant_buf = io.BytesIO()
     torch.save({"w": quant_result, "m": quant_meta}, quant_buf)
     quant_raw = quant_buf.getvalue()
