@@ -959,18 +959,9 @@ class GPT(nn.Module):
     def _init_weights(self, num_layers: int) -> None:
         if self.tie_embeddings:
             nn.init.normal_(self.tok_emb.weight, mean=0.0, std=self.tied_embed_init_std)
-        proj_scale = 1.0 / math.sqrt(2 * num_layers)
         for module in self.modules():
-            if isinstance(module, CastedLinear):
-                if getattr(module, "_zero_init", False):
-                    nn.init.zeros_(module.weight)
-                elif module.weight.shape[0] == module.weight.shape[1]:
-                    # Only orthogonal init for square weight matrices (Q, K, V projections)
-                    nn.init.orthogonal_(module.weight)
-            # Scale down output projections for residual stability
-            if isinstance(module, Block):
-                module.attn.proj.weight.data.mul_(proj_scale)
-                module.mlp.proj.weight.data.mul_(proj_scale)
+            if isinstance(module, nn.Linear) and getattr(module, "_zero_init", False):
+                nn.init.zeros_(module.weight)
 
     def _run_backbone(self, input_ids: Tensor) -> Tensor:
         x = self.tok_emb(input_ids)
@@ -1397,7 +1388,7 @@ def main() -> None:
         log0(f"Code size: {code_bytes} bytes")
 
     sd_cpu = {k: v.detach().cpu() for k, v in base_model.state_dict().items()}
-    quant_result, quant_meta = mixed_quantize_int6(sd_cpu, {"mlp", "attn"})
+    quant_result, quant_meta = mixed_quantize_int6(sd_cpu, {"mlp"})
     quant_buf = io.BytesIO()
     torch.save({"w": quant_result, "m": quant_meta}, quant_buf)
     quant_raw = quant_buf.getvalue()
