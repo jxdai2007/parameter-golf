@@ -484,9 +484,12 @@ def quantize_int6_per_row(t: Tensor, hessian: Tensor | None = None) -> tuple[Ten
     W = t32[:, perm].clone()
     W[:, dead[perm]] = 0
     H = H[perm][:, perm]
-    Hinv = torch.linalg.cholesky(H)
-    Hinv = torch.cholesky_inverse(Hinv)
-    Hinv = torch.linalg.cholesky(Hinv, upper=True)
+    try:
+        Hinv = torch.linalg.cholesky(H)
+        Hinv = torch.cholesky_inverse(Hinv)
+        Hinv = torch.linalg.cholesky(Hinv, upper=True)
+    except torch._C._LinAlgError:
+        return _quantize_int6_simple(t32)
     block_size = 128
     best_q, best_scale, best_err = None, None, float('inf')
     for pct in [0.9990, 0.9995, 0.9999, 0.99999, 1.0]:
