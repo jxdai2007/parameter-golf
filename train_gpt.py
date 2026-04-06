@@ -691,7 +691,7 @@ class CastedLinear(nn.Linear):
     # Keep weights in fp32 for optimizer/state quality, cast at matmul time for bf16 compute.
     # When _qat_flag > 0, simulate int6 rounding during forward pass (straight-through estimator).
     # Uses a tensor flag so torch.compile can't constant-fold it away.
-    _qat_flag = torch.tensor(0, dtype=torch.int32)
+    _qat_flag = False
 
     def forward(self, x: Tensor) -> Tensor:
         w = self.weight.to(x.dtype)
@@ -1326,8 +1326,8 @@ def main() -> None:
         elapsed_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
         scale = lr_mul(step, elapsed_ms)
         # Late QAT: enable int6 simulation once LR has decayed to threshold
-        if args.late_qat_threshold > 0 and scale < args.late_qat_threshold and CastedLinear._qat_flag.item() == 0:
-            CastedLinear._qat_flag.fill_(1)
+        if args.late_qat_threshold > 0 and scale < args.late_qat_threshold and not CastedLinear._qat_flag:
+            CastedLinear._qat_flag = True
             log0(f"late_qat:enabled step:{step} scale:{scale:.4f}")
         zero_grad_all()
         train_loss = torch.zeros((), device=device)
