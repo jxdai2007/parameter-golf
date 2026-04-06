@@ -27,11 +27,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-try:
-    import zstandard
-    _COMPRESSOR = "zstd"
-except ImportError:
-    _COMPRESSOR = "zlib"
+import lzma
+_COMPRESSOR = "lzma"
 
 # -----------------------------
 # HYPERPARAMETERS
@@ -1412,10 +1409,7 @@ def main() -> None:
     quant_buf = io.BytesIO()
     torch.save({"w": quant_result, "m": quant_meta}, quant_buf)
     quant_raw = quant_buf.getvalue()
-    if _COMPRESSOR == "zstd":
-        quant_blob = zstandard.ZstdCompressor(level=22).compress(quant_raw)
-    else:
-        quant_blob = zlib.compress(quant_raw, level=9)
+    quant_blob = lzma.compress(quant_raw, preset=9)
     if master_process:
         with open("final_model.int6.ptz", "wb") as f:
             f.write(quant_blob)
@@ -1429,10 +1423,7 @@ def main() -> None:
         dist.barrier()
     with open("final_model.int6.ptz", "rb") as f:
         quant_blob_disk = f.read()
-    if _COMPRESSOR == "zstd":
-        quant_decompressed = zstandard.ZstdDecompressor().decompress(quant_blob_disk)
-    else:
-        quant_decompressed = zlib.decompress(quant_blob_disk)
+    quant_decompressed = lzma.decompress(quant_blob_disk)
     quant_state = torch.load(io.BytesIO(quant_decompressed), map_location="cpu")
     deq_state = dequantize_mixed_int6(quant_state["w"], quant_state["m"], sd_cpu)
     base_model.load_state_dict(deq_state, strict=True)
