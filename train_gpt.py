@@ -1412,6 +1412,12 @@ def main() -> None:
 
         # SERIALIZATION + ROUNDTRIP VALIDATION
         # Int6 for MLP+attention weights (smaller file), int8 for embeddings (more sensitive).
+    if int(os.environ.get("SKIP_QUANT", "0")):
+        log0("skip_quant:enabled — skipping serialization/GPTQ/compression/eval")
+        if distributed:
+            dist.destroy_process_group()
+        return
+
     if master_process:
         torch.save(base_model.state_dict(), "final_model.pt")
         model_bytes = os.path.getsize("final_model.pt")
