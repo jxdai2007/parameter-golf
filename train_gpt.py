@@ -68,7 +68,7 @@ class Hyperparameters:
     rope_base = float(os.environ.get("ROPE_BASE", 50000.0))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
     bigram_vocab_size = int(os.environ.get("BIGRAM_VOCAB_SIZE", 2048))
-    bigram_dim = int(os.environ.get("BIGRAM_DIM", 128))
+    bigram_dim = int(os.environ.get("BIGRAM_DIM", 64))
     xsa_last_n = int(os.environ.get("XSA_LAST_N", 11))
     rope_dims = int(os.environ.get("ROPE_DIMS", 64))
     ln_scale = bool(int(os.environ.get("LN_SCALE", "0")))
