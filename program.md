@@ -25,9 +25,9 @@ To set up a new experiment, work with the user to:
 
 Each experiment runs on a **single GPU** for fast iteration (1xH100). The training script trains for a **fixed time budget** controlled by the script's internal settings. For development runs, you may reduce training steps/time to iterate faster, but **always restore full settings before recording a result**.
 
-You launch it simply as: `python train_gpt.py > run.log 2>&1`
+You launch fast experiments via the orchestrator: `python run_autoresearch.py fast --desc "description" > run.log 2>&1`
 
-Evaluation: `python eval.py > eval.log 2>&1`
+This runs training for 180s on 12 fixed shards, skips GPTQ and validation eval, and uses the **final train_loss as a proxy metric**. Total time: ~3 min per experiment. Full calibration runs with eval are done periodically.
 
 **What you CAN do:**
 
@@ -106,16 +106,26 @@ The experiment runs on a dedicated branch (e.g. `autoresearch/apr5` or `autorese
 LOOP FOREVER:
 
 1. Look at the git state: the current branch/commit we're on.
-2. Think about what to try next. Prioritize ideas by estimated BPB gain vs. complexity. Consult the **Research Directions** section below.
+2. Think about what to try next. Prioritize ideas by estimated train_loss improvement vs. complexity. Consult the **Research Directions** section below. Phase 1 ideas: architecture, optimizer, hyperparameters, quantization schemes, MLP width, number of layers, LR schedules — anything that only changes the trained model.
 3. Tune `train_gpt.py` with an experimental idea by directly hacking the code.
 4. git commit.
-5. Run the experiment: `python train_gpt.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context).
-6. Read out the results: `grep "val_bpb\|bpb\|artifact\|peak_vram" run.log`
+5. Run the fast experiment:
+   ```bash
+   python run_autoresearch.py fast --desc "short description" > run.log 2>&1
+   ```
+   This internally runs `train_gpt.py` with:
+   - `MAX_WALLCLOCK_SECONDS=180` (~3 min training)
+   - `SKIP_QUANT=1` (skip GPTQ/compression, exit after training)
+   - `SKIP_EVAL=1` (skip validation eval — use final train_loss as proxy)
+   - `EVAL_STRIDE=0` (no sliding window)
+   - Fixed 12 shards with seed=42 for reproducibility
+   - `TRAIN_LOG_EVERY=10` (frequent loss logging for early stopping)
+   Total time: ~3 min per experiment.
+6. Read out the results: `grep "fast_result\|train_loss\|early_stop\|RECOMMEND" run.log`
 7. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up on this idea.
-8. Check artifact size. If oversize, log as `oversize` and revert.
-9. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git).
-10. If val_bpb improved (lower) AND artifact ≤ 16MB, you "advance" the branch, keeping the git commit.
-11. If val_bpb is equal or worse, or artifact is oversize, you `git reset --hard` back to where you started.
+8. The orchestrator logs results to `experiments.jsonl` automatically and prints a delta against the fast baseline.
+9. If train_loss improved (negative delta), the experiment is a **success** — advance the branch, keep the commit.
+10. If train_loss is equal or worse, **discard** — `git reset --hard` back to where you started.
 
 ## Research Directions
 

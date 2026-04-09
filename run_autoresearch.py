@@ -2,11 +2,11 @@
 """Autoresearch orchestrator for Parameter Golf experiments.
 
 Two-phase architecture:
-  Phase 1 (model optimization): fast train + FP eval proxy
+  Phase 1 (model optimization): fast train + train_loss proxy (no eval)
   Phase 2 (eval optimization): frozen checkpoint + full eval
 
 Subcommands:
-  fast  — Phase 1 fast screening (~3-4 min): short wallclock, shard subset, skip GPTQ
+  fast  — Phase 1 fast screening (~3 min): short wallclock, shard subset, skip GPTQ+eval, use final train_loss as proxy
   full  — Full calibration run (~16 min): all shards, 600s, GPTQ, sliding window
   eval  — Phase 2 eval-only (~5-6 min): run fast_eval.py on frozen checkpoint
 
@@ -159,6 +159,12 @@ def parse_val_bpb(output: str) -> float | None:
     return float(matches[-1]) if matches else None
 
 
+def parse_final_train_loss(output: str) -> float | None:
+    """Extract the last train_loss from training output (used as fast proxy)."""
+    matches = re.findall(r"train_loss:(\d+\.\d+)", output)
+    return float(matches[-1]) if matches else None
+
+
 def parse_sliding_bpb(output: str) -> float | None:
     match = re.search(r"final_int6_sliding_window.*val_bpb:(\d+\.\d+)", output)
     return float(match.group(1)) if match else None
@@ -217,6 +223,7 @@ def cmd_fast(args: argparse.Namespace) -> None:
     env.update({
         "MAX_WALLCLOCK_SECONDS": str(FAST_WALLCLOCK),
         "SKIP_QUANT": "1",
+        "SKIP_EVAL": "1",
         "EVAL_STRIDE": "0",
         "TRAIN_LOG_EVERY": "10",
         "VAL_LOSS_EVERY": "9999",
@@ -228,9 +235,9 @@ def cmd_fast(args: argparse.Namespace) -> None:
     fast_baseline = load_fast_baseline()
 
     print(f"Shards: {shard_indices}")
-    print(f"Wallclock: {FAST_WALLCLOCK}s | SKIP_QUANT=1 | EVAL_STRIDE=0")
+    print(f"Wallclock: {FAST_WALLCLOCK}s | SKIP_QUANT=1 | SKIP_EVAL=1 (train_loss proxy)")
     if fast_baseline is not None:
-        print(f"Fast baseline BPB: {fast_baseline:.4f}")
+        print(f"Fast baseline train_loss: {fast_baseline:.4f}")
     print()
 
     t_start = time.perf_counter()
@@ -285,21 +292,22 @@ def cmd_fast(args: argparse.Namespace) -> None:
     total_time = time.perf_counter() - t_start
     output = "\n".join(output_lines)
 
-    # Parse results
-    bpb = parse_val_bpb(output) if not early_stopped else None
+    # Parse results — use final train_loss as the fast proxy metric (no eval)
+    train_loss = parse_final_train_loss(output) if not early_stopped else None
     train_time = parse_train_time(output)
 
-    # Compute delta
+    # Compute delta against baseline train_loss
     baseline_delta = None
-    if bpb is not None and fast_baseline is not None:
-        baseline_delta = bpb - fast_baseline
+    if train_loss is not None and fast_baseline is not None:
+        baseline_delta = train_loss - fast_baseline
 
     # Log experiment
     entry = {
         "id": exp_id,
         "description": args.desc,
         "mode": "fast",
-        "bpb": bpb,
+        "train_loss": train_loss,
+        "bpb": None,
         "bpb_full": None,
         "bpb_sliding": None,
         "train_time_s": round(train_time, 1) if train_time else None,
@@ -318,10 +326,10 @@ def cmd_fast(args: argparse.Namespace) -> None:
     print(f"fast_result {exp_id}: ", end="")
     if early_stopped:
         print("EARLY STOPPED (loss too high)")
-    elif bpb is None:
-        print("CRASHED (no val_bpb found)")
+    elif train_loss is None:
+        print("CRASHED (no train_loss found)")
     else:
-        print(f"val_bpb={bpb:.4f}", end="")
+        print(f"train_loss={train_loss:.4f}", end="")
         if baseline_delta is not None:
             direction = "IMPROVED" if baseline_delta < 0 else "WORSE"
             print(f" | delta={baseline_delta:+.4f} ({direction})", end="")
@@ -330,9 +338,9 @@ def cmd_fast(args: argparse.Namespace) -> None:
     print(f"{'=' * 60}")
 
     # Update fast baseline if this is the first run or explicitly requested
-    if fast_baseline is None and bpb is not None:
-        save_fast_baseline(bpb)
-        print(f"fast_baseline: set to {bpb:.4f} (first run)")
+    if fast_baseline is None and train_loss is not None:
+        save_fast_baseline(train_loss)
+        print(f"fast_baseline: set to {train_loss:.4f} (first run)")
 
     # Calibration recommendations
     successes, failures = count_recent_stats()
